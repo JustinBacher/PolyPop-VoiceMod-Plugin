@@ -1,0 +1,6 @@
+<uix type="Source">
+  <add_menu_group>Web Alerts</add_menu_group>
+  <category>Web Alerts</category>
+  <unique>true</unique>
+  <name>VoiceMod</name>
+</uix>
