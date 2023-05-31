@@ -62,7 +62,7 @@ end
 ]]----------------------------------------------------------------
 
 function Instance:onParamUpdate(prop, value)
-    self:send({action=, payload={parameterName=[prop:getName()], parameterValue=value}})
+    self:send({action="setCurrentVoiceParameter", payload={parameterName=[prop:getName()], parameterValue=value}})
 end
 
 function Instance:onVoiceUpdate()
@@ -191,8 +191,26 @@ end
 
 responseActions.getCurrentVoice = function(self, obj)
     self:clearVoiceProperties()
-    for param, value in pairs(obj.Parameters) do
-        print(param .. ": " .. value)
+    local kit = self.properties.VoiceChanger.VoiceProperties:getKit()
+    
+    for name, param in pairs(obj.Parameters) do
+        local paramKit
+
+        if type(param.value) == "boolean" then
+            paramKit = getEditor():createUIX(kit, "BoolParam")
+        elseif type(param.value) == "string" then
+            paramKit = getEditor():createUIX(kit, "TextParam")
+        elseif type(param.value) == "number" then
+            if (param.value % 1 == 0) or (param.maxValue % 1 == 0) or (param.minValue % 1 == 0) then
+                paramKit = getEditor():createUIX(kit, "IntParam")
+            else
+                paramKit = getEditor():createUIX(kit, "RealParam")
+            end
+            -- Set min and max values
+        end
+        
+        paramKit.properties.Value = param.value
+        paramKit.properties.Value:getKit():setName(name)
     end
 end
 

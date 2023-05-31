@@ -1,7 +1,7 @@
 Instance.properties = properties({
-    {name="Prop", type="Real", onUpdate="onParamUpdate"},
+    {name="Value", type="Real", onUpdate="onParamUpdate"},
 })
 
-function Instance:onParamUpdate(value)
-    self:getParent()onParamUpdate(self, value)
+function Instance:onParamUpdate()
+    self:getParent()onParamUpdate(self, self.properties.Value)
 end
