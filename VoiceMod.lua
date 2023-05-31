@@ -1,7 +1,7 @@
 local random = math.random
 
 --[[
-    UUID function from this gist:
+    UUID function:
     https://gist.github.com/jrus/3197011
 ]]
 local function uuid()
@@ -12,6 +12,10 @@ local function uuid()
     end)
 end
 
+--[[
+    Make a string proper case
+    https://stackoverflow.com/a/20285006
+]]
 local proper = function(str)
     return string.gsub(" "..str, "%W%l", string.upper):sub(2)
 end
@@ -52,7 +56,7 @@ end
 function Instance:clearVoiceProperties()
     local kit = self.properties.VoiceChanger.VoiceProperties:getKit()
     for i = 1, kit:getObjectCount() do
-        getEditor():removeFromLibrary(kitgetObjectByIndex(i))
+        getEditor():removeFromLibrary(kit:getObjectByIndex(i))
     end
 end
 
@@ -62,7 +66,13 @@ end
 ]]----------------------------------------------------------------
 
 function Instance:onParamUpdate(prop, value)
-    self:send({action="setCurrentVoiceParameter", payload={parameterName=[prop:getName()], parameterValue=value}})
+    self:send({
+        action="setCurrentVoiceParameter",
+        payload={
+            parameterName=prop:getName(),
+            parameterValue=value,
+        }
+    })
 end
 
 function Instance:onVoiceUpdate()
@@ -125,6 +135,10 @@ local responseActions = {}
     for p, ws in pairs(self.websockets) do
         if p == port then
             self.webSocket = ws
+        else
+            ws:removeEventListener("onMessage", self, self._onWsMessage(port))
+            ws:removeEventListener("onConnected", self, self._onWsConnected)
+            ws:removeEventListener("onDisconnected", self, self._onWsDisconnected)
         end
     end
 
@@ -214,9 +228,11 @@ responseActions.getCurrentVoice = function(self, obj)
     end
 end
 
-responseActions.licenseTypeChanged = responseActions.getUserLicense = function(self, obj)
+responseActions.getUserLicense = function(self, obj)
     self.properties.App.License = proper(obj.licenseType)
 end
+
+responseActions.licenseTypeChanged = responseActions.getUserLicense
 
 responseActions.getUser = function(self, obj)
     self.properties.App.UserID = obj.userID
@@ -230,19 +246,20 @@ end
 function Instance:send(cmd)
     if self.webSocket and self.webSocket:isConnected() then
         cmd.id = self.identity
-        
+
         if cmd.payload == nil then
             cmd.payload = {}
         end
-        
+
         self.webSocket:send(json.encode(cmd))
-    elseif cmd.action ~= "requestClient" then
+    elseif cmd.action ~= "registerClient" then
         print("VoiceMod not running. Please start VoiceMod.")
     end
 end
 
 function Instance:attemptConnection()
     self.websockets = {}
+
     for _, port in ipairs(voicemodPorts) do
         local ws = self.host:openWebSocket(string.format("ws://localhost:%s/v1", port))
         ws:addEventListener("onMessage", self, self._onWsMessage(port))
@@ -252,24 +269,22 @@ function Instance:attemptConnection()
     end
 end
 
-function Instance:_onWsConnected(port)
-    return function()
-        self.identity = uuid()
+function Instance:_onWsConnected()
+    self.identity = uuid()
 
-        self:send({
-            action="registerClient",
-            payload={
-                clientKey="xxx",
-            },
-        })
-    end
+    self:send({
+        action="registerClient",
+        payload={
+            clientKey="xxx",
+        },
+    })
 end
 
 function Instance:_onWsMessage(port)
-	return function(port)
+	return function(msg)
         local payload = json.decode(msg)
 
-        if payload.actionType == "requestClient" then
+        if payload.actionType == "registerClient" then
             self:clientRegistered(port)
             return
         end

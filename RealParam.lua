@@ -3,5 +3,5 @@ Instance.properties = properties({
 })
 
 function Instance:onParamUpdate()
-    self:getParent()onParamUpdate(self, self.properties.Value)
+    self:getParent():onParamUpdate(self, self.properties.Value)
 end
