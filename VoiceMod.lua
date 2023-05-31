@@ -52,7 +52,7 @@ end
 function Instance:clearVoiceProperties()
     local kit = self.properties.VoiceChanger.VoiceProperties:getKit()
     for i = 1, kit:getObjectCount() do
-        getEditor():removeFromLibrary(kit)
+        getEditor():removeFromLibrary(kitgetObjectByIndex(i))
     end
 end
 
@@ -61,8 +61,8 @@ end
     Functions to update VoiceMod
 ]]----------------------------------------------------------------
 
-function Instance:onPropValueUpdate(prop, value)
-    self:send({[prop:getName()]=value})
+function Instance:onParamUpdate(prop, value)
+    self:send({action=, payload={parameterName=[prop:getName()], parameterValue=value}})
 end
 
 function Instance:onVoiceUpdate()
