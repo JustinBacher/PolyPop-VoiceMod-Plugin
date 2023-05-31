@@ -23,6 +23,7 @@ Instance.properties = properties({
         {name="Voice", type="Enum", onUpdate="onVoiceUpdate"},
         {name="VoiceProperties", type="ObjectSet", readonly=true},
         {name="VoiceChanger", type="Bool", onUpdate="onVoiceChangerUpdate"},
+
         {name="Background", type="Bool", onUpdate="onBackgroundUpdate"},
         {name="MicMuted", type="Bool", onUpdate="onMicMuteUpdate"},
         {name="Beep", type="Bool", onUpdate="onBeepUpdate"},
@@ -49,33 +50,38 @@ function Instance:onPropValueUpdate(prop, value)
     self:send({[prop:getName()]=value})
 end
 
-function Instance:onVoiceChangerUpdate()
+function Instance:onVoiceUpdate()
+    local voice = self.properties.VoiceChanger.Voice.value
+    for i = 1, #self.voices do
+        if self.voices[i].friendlyName == voice then
+            self:send({action="loadVoice", payload={voiceID=self.voices[i].id}})
+            return
+        end
+    end
+end
 
+function Instance:onVoiceChangerUpdate()
+    self:send({action="toggleVoiceChanger"})
 end
 
 function Instance:onBackgroundUpdate()
-
+    self:send({action="toggleBackground"})
 end
 
 function Instance:onMicMuteUpdate()
-
+    self:send({action="toggleMuteMic"})
 end
 
 function Instance:onBeepUpdate()
-
+    self:send({action="setBeepSound", payload={badLanguage=self.properties.voiceChanger.Beep and 1 or 0}})
 end
 
-
 function Instance:StopAllMemes()
-
+    self:send({action="stopAllMemeSounds"})
 end
 
 function Instance:onMuteForMeUpdate()
-
-end
-
-function Instance:onMemeSoundUpdate()
-
+    self:send({action="toggleMuteForMe"})
 end
 
 function Instance:PlayMeme()
@@ -97,8 +103,16 @@ function Instance:clientRegistered(port)
     end
 end
 
-function Instance:()
-    
+function Instance:updateVoices(obj)
+    self.voices = obj.voices
+    local voices = {}
+
+    for i = 1, #self.voices do
+        table.insert(voices, self.voices.friendlyName)
+    end
+
+    self.properties.VoiceChanger.Voice:setElements(voices)
+    self.properties.VoiceChanger.Voice.value = obj.currentVoice
 end
 
 function Instance:()
@@ -110,7 +124,7 @@ function Instance:()
 end
 
 local responseActions = {
-
+    getVoice=Instance.updateVoices
 }
 
 
@@ -121,6 +135,11 @@ local responseActions = {
 function Instance:send(cmd)
     if self.webSocket and self.webSocket:isConnected() then
         cmd.id = self.identity
+        
+        if cmd.payload == nil then
+            cmd.payload = {}
+        end
+        
         self.webSocket:send(json.encode(cmd))
     elseif cmd.action ~= "requestClient" then
         print("VoiceMod not running. Please start VoiceMod.")
