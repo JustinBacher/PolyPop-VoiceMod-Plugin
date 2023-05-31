@@ -12,20 +12,26 @@ local function uuid()
     end)
 end
 
+local proper = function(str)
+    return string.gsub(" "..str, "%W%l", string.upper):sub(2)
+end
+
+
 local voicemodPorts = {59129, 20000, 39273, 42152, 43782, 46667, 35679, 37170, 38501, 33952, 30546}
 
 Instance.properties = properties({
     {name="App", type="PropertyGroup", items={
         {name="Status", type="Text", value="Disconnected", readonly=true},
-        {name="License", type="Text", value="free", readonly=true},
+        {name="UserID", type="Text", readonly=true},
+        {name="License", type="Text", readonly=true},
     }, ui={expand=true}},
     {name="VoiceChanger", type="PropertyGroup", items={
         {name="Voice", type="Enum", onUpdate="onVoiceUpdate"},
         {name="VoiceProperties", type="ObjectSet", readonly=true},
-        {name="VoiceChanger", type="Bool", onUpdate="onVoiceChangerUpdate"},
-
+        {name="Enabled", type="Bool", onUpdate="onVoiceChangerUpdate"},
         {name="Background", type="Bool", onUpdate="onBackgroundUpdate"},
         {name="MicMuted", type="Bool", onUpdate="onMicMuteUpdate"},
+        {name="HearMyself", type="Bool", onUpdate="onHearMyselfUpdate"},
         {name="Beep", type="Bool", onUpdate="onBeepUpdate"},
     }},
     {name="Memes", type="PropertyGroup", items={
@@ -39,6 +45,15 @@ Instance.properties = properties({
 function Instance:onInit()
     self.host = getNetwork():getHost("localhost")
     self:attemptConnection()
+    self:clearVoiceProperties()
+    self.properties.VoiceChanger.Beep = false
+end
+
+function Instance:clearVoiceProperties()
+    local kit = self.properties.VoiceChanger.VoiceProperties:getKit()
+    for i = 1, kit:getObjectCount() do
+        getEditor():removeFromLibrary(kit)
+    end
 end
 
 
@@ -51,10 +66,10 @@ function Instance:onPropValueUpdate(prop, value)
 end
 
 function Instance:onVoiceUpdate()
-    local voice = self.properties.VoiceChanger.Voice.value
-    for i = 1, #self.voices do
-        if self.voices[i].friendlyName == voice then
-            self:send({action="loadVoice", payload={voiceID=self.voices[i].id}})
+    local voiceName = self.properties.VoiceChanger.Voice.value
+    for _, voice in ipairs(self.voices) do
+        if voice.friendlyName == voiceName then
+            self:send({action="loadVoice", payload={voiceID=voice.id}})
             return
         end
     end
@@ -72,8 +87,12 @@ function Instance:onMicMuteUpdate()
     self:send({action="toggleMuteMic"})
 end
 
+function Instance:onHearMyselfUpdate()
+    self:send({action="toggleHearMyVoice"})
+end
+
 function Instance:onBeepUpdate()
-    self:send({action="setBeepSound", payload={badLanguage=self.properties.voiceChanger.Beep and 1 or 0}})
+    self:send({action="setBeepSound", payload={badLanguage=self.properties.VoiceChanger.Beep and 1 or 0}})
 end
 
 function Instance:StopAllMemes()
@@ -85,7 +104,14 @@ function Instance:onMuteForMeUpdate()
 end
 
 function Instance:PlayMeme()
-
+    local memes = self.memes
+    local memeName = self.properties.Memes.MemeSound.value
+    for _, meme in ipairs(self.memes) do
+        if meme.Name == memeName then
+            self:send({action="playMeme", payload={FileName=meme.FileName, IsKeyDown=true}})
+            return
+        end
+    end
 end
 
 
@@ -93,39 +119,90 @@ end
     Functions received from VoiceMod
 ]]----------------------------------------------------------------
 
-function Instance:clientRegistered(port)
+local responseActions = {}
+
+ function Instance:clientRegistered(port)
     for p, ws in pairs(self.websockets) do
         if p == port then
             self.webSocket = ws
-        else
-            self.websockets[p] = nil
         end
     end
+
+    self.websockets = nil
+    self:send({action="getVoices"})
+    self:send({action="getMemes"})
+    self:send({action="getHearMyselfStatus"})
+    self:send({action="getCurrentVoice"})
+    self:send({acion="getUser"})
+    self:send({action="getUserLicense"})
+    self.properties.App.Status = "Connected"
 end
 
-function Instance:updateVoices(obj)
+responseActions.getVoices = function(self, obj)
     self.voices = obj.voices
     local voices = {}
 
-    for i = 1, #self.voices do
-        table.insert(voices, self.voices.friendlyName)
+    for _, voice in ipairs(self.voices) do
+        table.insert(voices, voice.friendlyName)
     end
 
     self.properties.VoiceChanger.Voice:setElements(voices)
     self.properties.VoiceChanger.Voice.value = obj.currentVoice
 end
 
-function Instance:()
-    
+responseActions.getMemes = function(self, obj)
+    self.memes = obj.listOfMemes
+    local memes = {}
+
+    for _, meme in ipairs(self.memes) do
+        table.insert(memes, meme.friendlyName)
+    end
+
+    self.properties.Memes.MemeSound:setElements(memes)
 end
 
-function Instance:()
-    
+responseActions.toggleVoiceChanger = function(self, obj)
+    if self.properties.VoiceChanger.Enabled ~= obj.value then
+        self.properties.VoiceChanger.Enabled = obj.value
+    end
 end
 
-local responseActions = {
-    getVoice=Instance.updateVoices
-}
+responseActions.toggleBackground = function(self, obj)
+    if self.properties.VoiceChanger.Background ~= obj.value then
+        self.properties.VoiceChanger.Background = obj.value
+    end
+end
+
+responseActions.toggleHearMyVoice = function(self, obj)
+    if self.properties.VoiceChanger.HearMyself ~= obj.value then
+        self.properties.VoiceChanger.HearMyself = obj.value
+    end
+end
+
+responseActions.toggleMuteMic = function(self, obj)
+    if self.properties.VoiceChanger.MicMuted ~= obj.value then
+        self.properties.VoiceChanger.MicMuted = obj.value
+    end
+end
+
+responseActions.voiceChangedEvent = function(self, obj)
+    self:send({action="getCurrentVoice"})
+end
+
+responseActions.getCurrentVoice = function(self, obj)
+    self:clearVoiceProperties()
+    for param, value in pairs(obj.Parameters) do
+        print(param .. ": " .. value)
+    end
+end
+
+responseActions.licenseTypeChanged = responseActions.getUserLicense = function(self, obj)
+    self.properties.App.License = proper(obj.licenseType)
+end
+
+responseActions.getUser = function(self, obj)
+    self.properties.App.UserID = obj.userID
+end
 
 
 --[[--------------------------------------------------------------
@@ -185,10 +262,14 @@ function Instance:_onWsMessage(port)
             print(payload.actionType)
             return
         end
+
         action(self, payload.actionObject)
     end
 end
 
 function Instance:_onWsDisconnected()
+    self.properties.App.Status = "Disconnected"
+    self.properties.App.UserID = ""
+    self.properties.App.License = ""
     --Create timer to check connection repeatedly until VoiceMod opens back up
 end
