@@ -1,5 +1,9 @@
--- https://gist.github.com/jrus/3197011
 local random = math.random
+
+--[[
+    UUID function from this gist:
+    https://gist.github.com/jrus/3197011
+]]
 local function uuid()
     local template ='xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
     return string.gsub(template, '[xy]', function (c)
@@ -8,67 +12,89 @@ local function uuid()
     end)
 end
 
+local voicemodPorts = {59129, 20000, 39273, 42152, 43782, 46667, 35679, 37170, 38501, 33952, 30546}
+
 Instance.properties = properties({
     {name="App", type="PropertyGroup", items={
         {name="Status", type="Text", value="Disconnected", readonly=true},
         {name="License", type="Text", value="free", readonly=true},
     }, ui={expand=true}},
     {name="VoiceChanger", type="PropertyGroup", items={
-        {name="Voice", type="Enum"},
-        {name="VoiceProperties", type="ObjectSet"},
-        {name="VoiceChanger", type="Bool"},
-        {name="Background", type="Bool"},
-        {name="MicMuted", type="Bool"},
-        {name="Beep", type="Bool"},
+        {name="Voice", type="Enum", onUpdate="onVoiceUpdate"},
+        {name="VoiceProperties", type="ObjectSet", readonly=true},
+        {name="VoiceChanger", type="Bool", onUpdate="onVoiceChangerUpdate"},
+        {name="Background", type="Bool", onUpdate="onBackgroundUpdate"},
+        {name="MicMuted", type="Bool", onUpdate="onMicMuteUpdate"},
+        {name="Beep", type="Bool", onUpdate="onBeepUpdate"},
     }},
     {name="Memes", type="PropertyGroup", items={
         {name="StopAllMemes", type="Action"},
-        {name="MuteForMe", type="Bool"},
-        {name="MemeSound", type="Enum"},
+        {name="MuteForMe", type="Bool", onUpdate="onMuteForMeUpdate"},
+        {name="MemeSound", type="Enum", onUpdate="onMemeSoundUpdate"},
         {name="PlayMeme", type="Action"},
     }},
 })
 
 function Instance:onInit()
+    self.host = getNetwork():getHost("localhost")
     self:attemptConnection()
 end
 
-function Instance:send(cmd)
-    if self.webSocket and self.webSocket:isConnected() then
-        cmd.id = self.identity
-        self.webSocket:send(json.encode(cmd))
-    elseif cmd.action ~= "requestClient" then
-        print("VoiceMod not running. Please start VoiceMod.")
+
+--[[--------------------------------------------------------------
+    Functions to update VoiceMod
+]]----------------------------------------------------------------
+
+function Instance:onPropValueUpdate(prop, value)
+    self:send({[prop:getName()]=value})
+end
+
+function Instance:onVoiceChangerUpdate()
+
+end
+
+function Instance:onBackgroundUpdate()
+
+end
+
+function Instance:onMicMuteUpdate()
+
+end
+
+function Instance:onBeepUpdate()
+
+end
+
+
+function Instance:StopAllMemes()
+
+end
+
+function Instance:onMuteForMeUpdate()
+
+end
+
+function Instance:onMemeSoundUpdate()
+
+end
+
+function Instance:PlayMeme()
+
+end
+
+
+--[[--------------------------------------------------------------
+    Functions received from VoiceMod
+]]----------------------------------------------------------------
+
+function Instance:clientRegistered(port)
+    for p, ws in pairs(self.websockets) do
+        if p == port then
+            self.webSocket = ws
+        else
+            self.websockets[p] = nil
+        end
     end
-end
-
-function Instance:attemptConnection()
-	local host = getNetwork():getHost("localhost")
-	self.webSocket = host:openWebSocket("ws://localhost:/v1")
-	self.webSocket:setAutoReconnect(true)
-
-	self.webSocket:addEventListener("onMessage", self, self._onWsMessage)
-	self.webSocket:addEventListener("onConnected", self, self._onWsConnected)
-	self.webSocket:addEventListener("onDisconnected", self, self._onWsDisconnected)
-end
-
-function Instance:_onWsConnected()
-    self.identity = uuid()
-
-    self:send({
-        action="registerClient",
-        payload={
-            clientKey="xxx",
-        },
-    })
-end
-
-function Instance:_onWsDisconnected()
-    --Create timer to check connection repeatedly until VoiceMod opens back up
-end
-
-function Instance:clientRegistered()
-    
 end
 
 function Instance:()
@@ -84,17 +110,66 @@ function Instance:()
 end
 
 local responseActions = {
-    requestClient=self.clientConnected,
 
 }
 
-function Instance:_onWsMessage(msg)
-	local payload = json.decode(msg)
-	local action = responseActions[payload.actionType]
 
-    if action == nil then
-        print(payload.actionType)
-        return
+--[[--------------------------------------------------------------
+    Websocket Functions
+]]----------------------------------------------------------------
+
+function Instance:send(cmd)
+    if self.webSocket and self.webSocket:isConnected() then
+        cmd.id = self.identity
+        self.webSocket:send(json.encode(cmd))
+    elseif cmd.action ~= "requestClient" then
+        print("VoiceMod not running. Please start VoiceMod.")
     end
-    action(self, payload.actionObject)
+end
+
+function Instance:attemptConnection()
+    self.websockets = {}
+    for _, port in ipairs(voicemodPorts) do
+        local ws = self.host:openWebSocket(string.format("ws://localhost:%s/v1", port))
+        ws:addEventListener("onMessage", self, self._onWsMessage(port))
+        ws:addEventListener("onConnected", self, self._onWsConnected)
+        ws:addEventListener("onDisconnected", self, self._onWsDisconnected)
+        self.websockets[port] = ws
+    end
+end
+
+function Instance:_onWsConnected(port)
+    return function()
+        self.identity = uuid()
+
+        self:send({
+            action="registerClient",
+            payload={
+                clientKey="xxx",
+            },
+        })
+    end
+end
+
+function Instance:_onWsMessage(port)
+	return function(port)
+        local payload = json.decode(msg)
+
+        if payload.actionType == "requestClient" then
+            self:clientRegistered(port)
+            return
+        end
+
+        local action = responseActions[payload.actionType]
+
+        if action == nil then
+            print(payload.actionType)
+            return
+        end
+        action(self, payload.actionObject)
+    end
+end
+
+function Instance:_onWsDisconnected()
+    --Create timer to check connection repeatedly until VoiceMod opens back up
 end

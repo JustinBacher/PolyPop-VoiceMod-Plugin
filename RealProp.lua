@@ -1,5 +1,5 @@
 Instance.properties = properties({
-    {name="Prop", type="Int", onUpdate="onValueUpdate"},
+    {name="Prop", type="Real", onUpdate="onValueUpdate"},
 })
 
 function Instance:onValueUpdate(value)
