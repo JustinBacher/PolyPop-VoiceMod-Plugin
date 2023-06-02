@@ -16,23 +16,37 @@ end
     Make a string proper case
     https://stackoverflow.com/a/20285006
 ]]
-local proper = function(str)
+function string.proper(str)
     return string.gsub(" "..str, "%W%l", string.upper):sub(2)
+end
+
+--[[
+    Insert into a string at pos
+    https://stackoverflow.com/a/59561933
+]]
+function string.insert(str1, str2, pos)
+    return str1:sub(1,pos)..str2..str1:sub(pos+1)
 end
 
 
 local voicemodPorts = {59129, 20000, 39273, 42152, 43782, 46667, 35679, 37170, 38501, 33952, 30546}
+local envFile = io.open(getLocalFolder() .. ".env", "r")
+local apiKey
+if envFile then
+    apiKey = json.decode(envFile:read("a")).apiKey
+    envFile:close()
+end
 
 Instance.properties = properties({
     {name="App", type="PropertyGroup", items={
-        {name="Status", type="Text", value="Disconnected", readonly=true},
-        {name="UserID", type="Text", readonly=true},
-        {name="License", type="Text", readonly=true},
+        {name="Status", type="Text", value="Disconnected", ui={readonly=true}},
+        {name="UserID", type="Text", ui={readonly=true}},
+        {name="License", type="Text", ui={readonly=true}},
     }, ui={expand=true}},
     {name="VoiceChanger", type="PropertyGroup", items={
-        {name="Voice", type="Enum", onUpdate="onVoiceUpdate"},
-        {name="VoiceProperties", type="ObjectSet", readonly=true},
         {name="Enabled", type="Bool", onUpdate="onVoiceChangerUpdate"},
+        {name="Voice", type="Enum", onUpdate="onVoiceUpdate"},
+        {name="VoiceProperties", type="ObjectSet", ui={readonly=true}},
         {name="Background", type="Bool", onUpdate="onBackgroundUpdate"},
         {name="MicMuted", type="Bool", onUpdate="onMicMuteUpdate"},
         {name="HearMyself", type="Bool", onUpdate="onHearMyselfUpdate"},
@@ -47,10 +61,14 @@ Instance.properties = properties({
 })
 
 function Instance:onInit()
+    self.identity = uuid()
     self.host = getNetwork():getHost("localhost")
     self:attemptConnection()
     self:clearVoiceProperties()
     self.properties.VoiceChanger.Beep = false
+    self.properties.App.Status = "Disconnected"
+    self.properties.App.UserID = ""
+    self.properties.App.License = ""
 end
 
 function Instance:clearVoiceProperties()
@@ -114,7 +132,6 @@ function Instance:onMuteForMeUpdate()
 end
 
 function Instance:PlayMeme()
-    local memes = self.memes
     local memeName = self.properties.Memes.MemeSound.value
     for _, meme in ipairs(self.memes) do
         if meme.Name == memeName then
@@ -131,17 +148,7 @@ end
 
 local responseActions = {}
 
- function Instance:clientRegistered(port)
-    for p, ws in pairs(self.websockets) do
-        if p == port then
-            self.webSocket = ws
-        else
-            ws:removeEventListener("onMessage", self, self._onWsMessage(port))
-            ws:removeEventListener("onConnected", self, self._onWsConnected)
-            ws:removeEventListener("onDisconnected", self, self._onWsDisconnected)
-        end
-    end
-
+ function Instance:clientRegistered()
     self.websockets = nil
     self:send({action="getVoices"})
     self:send({action="getMemes"})
@@ -160,8 +167,8 @@ responseActions.getVoices = function(self, obj)
         table.insert(voices, voice.friendlyName)
     end
 
-    self.properties.VoiceChanger.Voice:setElements(voices)
-    self.properties.VoiceChanger.Voice.value = obj.currentVoice
+    self.properties.VoiceChanger:find("Voice"):setElements(voices)
+    self.properties.VoiceChanger:find("Voice").value = obj.currentVoice
 end
 
 responseActions.getMemes = function(self, obj)
@@ -172,7 +179,7 @@ responseActions.getMemes = function(self, obj)
         table.insert(memes, meme.friendlyName)
     end
 
-    self.properties.Memes.MemeSound:setElements(memes)
+    self.properties.Memes:find("MemeSound"):setElements(memes)
 end
 
 responseActions.toggleVoiceChanger = function(self, obj)
@@ -206,10 +213,14 @@ end
 responseActions.getCurrentVoice = function(self, obj)
     self:clearVoiceProperties()
     local kit = self.properties.VoiceChanger.VoiceProperties:getKit()
-    
-    for name, param in pairs(obj.Parameters) do
-        local paramKit
 
+    for name, param in pairs(obj.parameters) do
+        if string.sub(name, 1, 1) == "_" then
+            goto continue
+        end
+        
+        local paramKit
+        
         if type(param.value) == "boolean" then
             paramKit = getEditor():createUIX(kit, "BoolParam")
         elseif type(param.value) == "string" then
@@ -220,16 +231,15 @@ responseActions.getCurrentVoice = function(self, obj)
             else
                 paramKit = getEditor():createUIX(kit, "RealParam")
             end
-            -- Set min and max values
         end
-        
-        paramKit.properties.Value = param.value
-        paramKit.properties.Value:getKit():setName(name)
+
+        paramKit:initParam(name, param)
+        ::continue::
     end
 end
 
 responseActions.getUserLicense = function(self, obj)
-    self.properties.App.License = proper(obj.licenseType)
+    self.properties.App.License = string.proper(obj.licenseType)
 end
 
 responseActions.licenseTypeChanged = responseActions.getUserLicense
@@ -247,11 +257,12 @@ function Instance:send(cmd)
     if self.webSocket and self.webSocket:isConnected() then
         cmd.id = self.identity
 
+        local payload = json.encode(cmd)
         if cmd.payload == nil then
-            cmd.payload = {}
+            payload = string.insert(payload, ',"payload":{}', #payload - 1)
         end
-
-        self.webSocket:send(json.encode(cmd))
+        print(payload)
+        self.webSocket:send(payload)
     elseif cmd.action ~= "registerClient" then
         print("VoiceMod not running. Please start VoiceMod.")
     end
@@ -269,30 +280,37 @@ function Instance:attemptConnection()
     end
 end
 
-function Instance:_onWsConnected()
-    self.identity = uuid()
-
+function Instance:_onWsConnected(ws)
+    print("connected")
+    self.webSocket = ws
     self:send({
         action="registerClient",
+        id=self.identity,
         payload={
-            clientKey="xxx",
+            clientKey=apiKey,
         },
     })
 end
 
 function Instance:_onWsMessage(port)
-	return function(msg)
+	return function(self, msg)
         local payload = json.decode(msg)
 
-        if payload.actionType == "registerClient" then
-            self:clientRegistered(port)
+        --print(msg)
+
+        if payload.action == "registerClient" then
+            self:clientRegistered()
             return
+        end
+
+        if payload.socketId then
+            self.identity = payload.socketId
         end
 
         local action = responseActions[payload.actionType]
 
         if action == nil then
-            print(payload.actionType)
+            print("No action: " .. msg)
             return
         end
 
